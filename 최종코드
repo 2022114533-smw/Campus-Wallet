@@ -1,0 +1,226 @@
+# Campus Wallet - 3단계 (MUST + NICE + 데이터 초기화)
+# MUST: 거래 입력/목록 + CSV 저장 + 예산 설정 + 예산 대비 현황
+# NICE: ① 예산 초과 경고  ② 하루 예산 계산  ③ 소비 분석(TOP)  + 데이터 초기화
+
+import csv
+import datetime
+import calendar
+
+RECORDS_FILE = "records.csv"
+BUDGETS_FILE = "budgets.csv"
+RECORD_FIELDS = ["date", "category", "amount", "memo"]
+BUDGET_FIELDS = ["category", "budget"]
+
+
+# ---------- 파일 불러오기 / 저장 ----------
+
+def load_data():
+    records = []
+    try:
+        with open(RECORDS_FILE, "r", encoding="utf-8", newline="") as f:
+            for row in csv.DictReader(f):
+                row["amount"] = int(row["amount"])
+                records.append(row)
+    except FileNotFoundError:
+        pass
+    return records
+
+
+def save_data(records):
+    with open(RECORDS_FILE, "w", encoding="utf-8", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=RECORD_FIELDS)
+        writer.writeheader()
+        for r in records:
+            writer.writerow(r)
+
+
+def load_budgets():
+    budgets = {}
+    try:
+        with open(BUDGETS_FILE, "r", encoding="utf-8", newline="") as f:
+            for row in csv.DictReader(f):
+                budgets[row["category"]] = int(row["budget"])
+    except FileNotFoundError:
+        pass
+    return budgets
+
+
+def save_budgets(budgets):
+    with open(BUDGETS_FILE, "w", encoding="utf-8", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=BUDGET_FIELDS)
+        writer.writeheader()
+        for category in budgets:
+            writer.writerow({"category": category, "budget": budgets[category]})
+
+
+# ---------- 핵심 기능 ----------
+
+def add_record(records, date, category, amount, memo):
+    records.append({"date": date, "category": category, "amount": amount, "memo": memo})
+
+
+def show_records(records):
+    if len(records) == 0:
+        print("아직 기록이 없어요.")
+        return
+    print("----- 거래 목록 -----")
+    for r in records:
+        print(f"{r['date']} | {r['category']} | {r['amount']}원 | {r['memo']}")
+
+
+def set_budget(budgets, category, limit):
+    budgets[category] = limit
+
+
+def spent_by_category(records):
+    spent = {}
+    for r in records:
+        if r["amount"] < 0:
+            category = r["category"]
+            spent[category] = spent.get(category, 0) + (-r["amount"])
+    return spent
+
+
+def show_budget_status(records, budgets):
+    if len(budgets) == 0:
+        print("아직 예산을 설정하지 않았어요. (메뉴 3번)")
+        return
+    spent = spent_by_category(records)
+    print("----- 예산 현황 -----")
+    for category in budgets:
+        limit = budgets[category]
+        used = spent.get(category, 0)
+        percent = int(used / limit * 100) if limit > 0 else 0
+        print(f"  {category}  {used:,} / {limit:,}원  ({percent}% 사용)")
+    balance = 0
+    for r in records:
+        balance += r["amount"]
+    print("-" * 30)
+    print(f"  현재 잔액: {balance:,}원")
+
+
+# ---------- NICE ① 예산 초과 경고 ----------
+
+def check_budget_alert(records, budgets, category):
+    if category not in budgets:
+        return
+    limit = budgets[category]
+    if limit <= 0:
+        return
+    used = spent_by_category(records).get(category, 0)
+    percent = int(used / limit * 100)
+    if used > limit:
+        print(f"⚠ '{category}' 예산을 초과했어요! ({used:,} / {limit:,}원, {percent}%)")
+    elif percent >= 80:
+        print(f"⚠ '{category}' 예산의 {percent}%를 썼어요. 조심하세요!")
+
+
+# ---------- NICE ② 하루 예산 ----------
+
+def show_daily_budget(records, budgets):
+    if len(budgets) == 0:
+        print("먼저 예산을 설정해주세요. (메뉴 3번)")
+        return
+    total_budget = 0
+    for category in budgets:
+        total_budget += budgets[category]
+    total_spent = 0
+    for category, amount in spent_by_category(records).items():
+        total_spent += amount
+    remaining = total_budget - total_spent
+
+    today = datetime.date.today()
+    last_day = calendar.monthrange(today.year, today.month)[1]
+    days_left = last_day - today.day + 1
+
+    per_day = remaining // days_left if days_left > 0 else remaining
+    print(f"이번 달 남은 예산: {remaining:,}원")
+    print(f"남은 날: {days_left}일 (오늘 포함)")
+    print(f"하루에 쓸 수 있는 돈: 약 {per_day:,}원")
+
+
+# ---------- NICE ③ 소비 분석 (TOP 카테고리) ----------
+
+def show_top_category(records):
+    spent = spent_by_category(records)
+    if len(spent) == 0:
+        print("아직 지출이 없어요.")
+        return
+    top_category = ""
+    top_amount = 0
+    for category in spent:
+        if spent[category] > top_amount:
+            top_amount = spent[category]
+            top_category = category
+    print(f"이번 달 가장 많이 쓴 곳: {top_category} ({top_amount:,}원)")
+    print(f"💬 이번 달은 '{top_category}' 지출이 가장 많네요!")
+
+
+# ---------- 데이터 초기화 ----------
+
+def reset_data(records, budgets):
+    # 거래 기록과 예산을 모두 비우고, 빈 상태를 파일에 덮어쓴다
+    records.clear()          # 리스트 비우기
+    budgets.clear()          # 딕셔너리 비우기  ← 이 줄을 빼면 '거래만' 초기화
+    save_data(records)       # 빈 상태로 파일 갱신
+    save_budgets(budgets)
+
+
+# ---------- 메인 메뉴 ----------
+
+def main():
+    records = load_data()
+    budgets = load_budgets()
+
+    while True:
+        print()
+        print("===== Campus Wallet =====")
+        print("  1. 거래 입력")
+        print("  2. 거래 목록 보기")
+        print("  3. 예산 설정")
+        print("  4. 예산 대비 현황 보기")
+        print("  5. 하루 쓸 수 있는 돈 보기")
+        print("  6. 소비 분석 (가장 많이 쓴 곳)")
+        print("  7. 데이터 초기화")
+        print("  8. 종료")
+        choice = input("번호를 입력하세요: ")
+
+        if choice == "1":
+            date = input("날짜 (예: 2026-05-07): ")
+            category = input("카테고리 (예: 식비): ")
+            amount = int(input("금액 (수입 +, 지출 -): "))
+            memo = input("메모: ")
+            add_record(records, date, category, amount, memo)
+            save_data(records)
+            print("저장했어요!")
+            if amount < 0:
+                check_budget_alert(records, budgets, category)
+        elif choice == "2":
+            show_records(records)
+        elif choice == "3":
+            category = input("카테고리 (예: 식비): ")
+            limit = int(input("한 달 예산 (원): "))
+            set_budget(budgets, category, limit)
+            save_budgets(budgets)
+            print("예산을 설정했어요!")
+        elif choice == "4":
+            show_budget_status(records, budgets)
+        elif choice == "5":
+            show_daily_budget(records, budgets)
+        elif choice == "6":
+            show_top_category(records)
+        elif choice == "7":
+            confirm = input("정말 모든 기록과 예산을 지울까요? 되돌릴 수 없어요. (y/n): ")
+            if confirm == "y":
+                reset_data(records, budgets)
+                print("초기화했어요. 처음 상태로 돌아갔어요.")
+            else:
+                print("초기화를 취소했어요.")
+        elif choice == "8":
+            print("안녕히 가세요!")
+            break
+        else:
+            print("1~8 중에서 골라주세요.")
+
+
+main()
